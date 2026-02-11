@@ -1,0 +1,117 @@
+#include <iostream>
+#include <thread>
+#include <chrono>
+#include <vector>
+#include <string>
+#include <cmath>
+#include <iomanip>
+#include <mutex>
+#include <random>
+#include <Windows.h>
+
+using namespace std;
+
+const int WIDTH = 100;
+const int HEIGHT = 30;
+const double SPEED_PX_S = 15.0;
+const int DELAY_MS = 500; 
+mutex printMutex;
+
+struct Point {
+    double x, y;
+};
+
+class LegalEntity {
+public:
+    string name;
+    Point pos;
+    Point target;
+    bool reached;
+
+    LegalEntity(string n, double startX, double startY)
+        : name(n), pos{ startX, startY }, reached(false) {
+
+        // Межі лівої верхньої чверті (0..50 по ширині, 0..15 по висоті)
+        double limitX = WIDTH / 2.0;
+        double limitY = HEIGHT / 2.0;
+
+        // Перевіряємо, чи фірма вже знаходиться в потрібній зоні
+        if (startX >= 0 && startX <= limitX && startY >= 0 && startY <= limitY) {
+            reached = true;
+            target = pos;
+            lock_guard<mutex> lock(printMutex);
+            cout << "[СТАТУС] " << name << ": Офіс вже у потрібній зоні (" << (int)pos.x << ", " << (int)pos.y << ")." << endl;
+        }
+        else {
+            // Генеруємо нову точку (ціль) у лівій верхній чверті
+            static mt19937 gen(random_device{}());
+            uniform_real_distribution<> disX(0, limitX);
+            uniform_real_distribution<> disY(0, limitY);
+            target = { disX(gen), disY(gen) };
+
+            lock_guard<mutex> lock(printMutex);
+           
+            cout << "[СТАРТ]  " << name << " почав переїзд з (" << (int)pos.x << ", " << (int)pos.y << ") -> до (" << (int)target.x << ", " << (int)target.y << ")" << endl;
+        }
+    }
+
+    void move() {
+        if (reached) return;
+
+        double dx = target.x - pos.x;
+        double dy = target.y - pos.y;
+        double distance = hypot(dx, dy);
+
+        double totalTimeSec = distance / SPEED_PX_S;
+        double currentTime = 0.0;
+        double deltaT = DELAY_MS / 1000.0;
+
+        double dirX = dx / distance;
+        double dirY = dy / distance;
+
+        while (currentTime < totalTimeSec) {
+            pos.x += dirX * SPEED_PX_S * deltaT;
+            pos.y += dirY * SPEED_PX_S * deltaT;
+
+            // Виводимо повідомлення про рух
+            {
+                lock_guard<mutex> lock(printMutex);
+                cout << " -> " << name << " у дорозі... Поточні координати: " << (int)pos.x << ", " << (int)pos.y << endl;
+            }
+
+            this_thread::sleep_for(chrono::milliseconds(DELAY_MS));
+            currentTime += deltaT;
+        }
+
+        pos = target;
+        reached = true;
+        {
+            lock_guard<mutex> lock(printMutex);
+            cout << "[ФІНІШ]  " << name << " успішно переїхав! (" << (int)pos.x << ", " << (int)pos.y << ")" << endl;
+        }
+    }
+};
+
+int main() {
+    SetConsoleOutputCP(1251); SetConsoleCP(1251);
+
+    vector<LegalEntity> entities;
+    // Назви фірм
+    entities.emplace_back("ТОВ 'Глобал-Сервіс'", 80.0, 25.0);
+    entities.emplace_back("ПП 'Еко-Продукт'", 10.0, 5.0);
+    entities.emplace_back("АТ 'Буд-Інвест'", 60.0, 20.0);
+
+    vector<thread> threads;
+
+    // Запускаємо потоки для кожної фірми
+    for (auto& entity : entities) {
+        threads.emplace_back(&LegalEntity::move, &entity);
+    }
+
+    // Чекаємо завершення переїзду всіх
+    for (auto& t : threads) {
+        if (t.joinable()) t.join();
+    }
+
+    return 0;
+}
